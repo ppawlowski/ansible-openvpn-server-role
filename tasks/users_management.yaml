@@ -1,0 +1,159 @@
+- name: Check if clients certificates/keys exists
+  command: ./easyrsa show-cert {{item.name}}
+  args:
+    chdir: "{{easyrsa_directory}}"
+  with_items: "{{openvpn_clients}}"
+  register: clientcert_check
+  changed_when: False
+  ignore_errors: True
+
+- name: Create client keys and csr
+  command: ./easyrsa --req-cn={{item.item.name}} gen-req {{item.item.name}} nopass
+  args:
+    chdir: "{{easyrsa_directory}}"
+    creates: "{{easyrsa_directory}}/pki/private/{{item.item.name}}.key"
+  with_items: "{{ clientcert_check.results }}"
+  no_log: true
+  when: item.rc == 1
+
+- name: Get the certificate authority to sign the client's request
+  command: ./easyrsa sign-req client {{item.item.name}}
+  args:
+    chdir: "{{easyrsa_directory}}"
+    creates: "{{easyrsa_directory}}/pki/issued/{{item.item.name}}.crt"
+  with_items: "{{ clientcert_check.results }}"
+  no_log: true
+  when: item.rc == 1
+
+- name: Create directories for openVPN client's configuration
+  file:
+    path: "{{openvpn_client_configuration_directory}}/{{item.name}}"
+    state: directory
+    mode: 0755
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Copy client key to shared configuration directory
+  command: cp -a {{easyrsa_directory}}/pki/private/{{item.name}}.key {{openvpn_client_configuration_directory}}/{{item.name}}/
+  args:
+    creates: "{{openvpn_client_configuration_directory}}/{{item.name}}/{{item.name}}.key"
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+
+- name: Adjust client key to openVPN configuration - step 1/2
+  lineinfile:
+    path: "{{openvpn_client_configuration_directory}}/{{item.name}}/{{item.name}}.key"
+    state: present
+    line: "<key>"
+    insertbefore: BOF
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Adjust client key to openVPN configuration - step 2/2
+  lineinfile:
+    path: "{{openvpn_client_configuration_directory}}/{{item.name}}/{{item.name}}.key"
+    state: present
+    line: "</key>"
+    insertafter: EOF
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Copy clients certificates to shared configuration directory
+  command: cp -a {{easyrsa_directory}}/pki/issued/{{item.name}}.crt {{openvpn_client_configuration_directory}}/{{item.name}}/
+  args:
+    creates: "{{openvpn_client_configuration_directory}}/{{item.name}}/{{item.name}}.crt"
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Adjust client certificate to openVPN configuration - step 1/2
+  lineinfile:
+    path: "{{openvpn_client_configuration_directory}}/{{item.name}}/{{item.name}}.crt"
+    state: present
+    line: "<cert>"
+    insertbefore: BOF
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Adjust client certificate to openVPN configuration - step 2/2
+  lineinfile:
+    path: "{{openvpn_client_configuration_directory}}/{{item.name}}/{{item.name}}.crt"
+    state: present
+    line: "</cert>"
+    insertafter: EOF
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Copy openVPN server certificate to client's directory
+  command: cp {{openvpn_directory}}/ca.crt {{openvpn_client_configuration_directory}}/{{item.name}}/ca.crt
+  args:
+    creates: "{{openvpn_client_configuration_directory}}/{{item.name}}/ca.crt"
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Adjust openVPN server CA certificate to openVPN configuration - step 1/2
+  lineinfile:
+    path: "{{openvpn_client_configuration_directory}}/{{item.name}}/ca.crt"
+    state: present
+    line: "<ca>"
+    insertbefore: BOF
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Adjust clients certificates to openVPN configuration - step 2/2
+  lineinfile:
+    path: "{{openvpn_client_configuration_directory}}/{{item.name}}/ca.crt"
+    state: present
+    line: "</ca>"
+    insertafter: EOF
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Create openVPN client's base configuration file
+  template:
+    src: openvpn_client.j2
+    dest: "{{openvpn_client_configuration_directory}}/{{item.name}}/00_openvpn_base.ovpn"
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+
+- name: Create final openVPN client configuration
+  assemble:
+    src: "{{openvpn_client_configuration_directory}}/{{item.name}}"
+    dest: "{{openvpn_client_configuration_directory}}/{{item.name}}.ovpn"
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "present"
+  register: clients_final_configuration
+
+- name: Check if clients certificate is already revoked
+  shell: "cat pki/index.txt | grep {{item.name}} | awk '{print $1}'"
+  args:
+    chdir: "{{easyrsa_directory}}"
+  with_items: "{{openvpn_clients}}"
+  when: item.state == "absent"
+  changed_when: False
+  register: clients_to_revoke
+
+- name: Revoke client certificate
+  command: ./easyrsa revoke {{item.item.name}}
+  args:
+    chdir: "{{easyrsa_directory}}"
+  with_items: "{{clients_to_revoke.results}}"
+  when:
+    - item.stdout is defined
+    - item.stdout == "V"
+    - item.item.state == "absent"
+  register: revoke_state
+
+- name: Regenerate certificate revoke list
+  command: ./easyrsa gen-crl
+  args:
+    chdir: "{{easyrsa_directory}}"
+  when: revoke_state.changed
+
+- name: Copy new  certivicates revokation list file to openVPN configuration directory
+  command: cp -a pki/crl.pem {{openvpn_directory}}
+  args:
+    chdir: "{{easyrsa_directory}}"
+  when: revoke_state.changed
+  notify:
+    - Restart openVPN server

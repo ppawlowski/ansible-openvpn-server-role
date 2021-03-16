@@ -1,0 +1,25 @@
+- name: Disable selinux
+  selinux:
+    state: disabled
+
+- name: Install openvpn packets
+  yum:
+    name: "{{openvpn_packets}}"
+    state: present
+
+- name: Enable packets forwarding
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: 1
+    state: present
+    sysctl_file: /etc/sysctl.d/openvpn.conf
+    reload: yes
+
+- name: Add NAT translation for packets between network and pulic IP address
+  iptables:
+    action: append
+    table: nat
+    chain: POSTROUTING
+    source: "{{openvpn_cidr}}"
+    out_interface: "{{ ansible_default_ipv4.interface }}"
+    jump: MASQUERADE

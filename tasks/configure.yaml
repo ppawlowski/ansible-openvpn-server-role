@@ -1,0 +1,77 @@
+- name: Create openVPN client configuration directory
+  file:
+    path: "{{openvpn_client_configuration_directory}}"
+    state: directory
+    owner: root
+    group: root
+
+- name: Create openVPN server configuration
+  template:
+    src: openvpn_server.j2
+    dest: "{{openvpn_directory}}/server.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  notify:
+    - Restart openVPN server
+
+- name: Create configuration file for easy-rsa script
+  template:
+    src: easyrsa_vars.j2
+    dest: "{{easyrsa_directory}}/vars"
+
+- name: Initialize pki
+  command: ./easyrsa init-pki
+  args:
+    chdir: "{{easyrsa_directory}}"
+    creates: "{{easyrsa_directory}}/pki"
+
+- name: "Build CA keys"
+  command: ./easyrsa build-ca nopass
+  args:
+    chdir: "{{easyrsa_directory}}"
+    creates: "{{easyrsa_directory}}/pki/private/ca.key"
+  register: cakey
+
+- name: "Build the DH (Diffie-Hellman) key"
+  command: ./easyrsa gen-dh
+  args:
+    chdir: "{{easyrsa_directory}}"
+    creates: "{{easyrsa_directory}}/pki/dh.pem"
+  register: dhkey
+
+- name: "Generate the server certificate/key"
+  command: ./easyrsa --req-cn="{{openvpn_server_common_name}}" gen-req server nopass
+  args:
+    chdir: "{{easyrsa_directory}}"
+    creates: "{{easyrsa_directory}}/pki/private/server.key"
+  register: serverkey
+
+- name: "Get the new CA to sign our server key"
+  command: ./easyrsa sign-req server server
+  args:
+    chdir: "{{easyrsa_directory}}"
+    creates: "{{easyrsa_directory}}/pki/issued/server.crt"
+  register: servercrt
+  when: serverkey.changed
+
+- name: Generate clear certificates revokation list file
+  command: ./easyrsa gen-crl
+  args:
+    chdir: "{{easyrsa_directory}}"
+    creates: "{{easyrsa_directory}}/pki/crl.pem"
+  register: crlcrt
+
+- name: Copy certificates and keys to openVPN configuration directory
+  command: cp -a pki/ca.crt pki/dh.pem pki/issued/server.crt pki/private/server.key pki/crl.pem {{openvpn_directory}}
+  args:
+    chdir: "{{easyrsa_directory}}"
+  when: cakey.changed or dhkey.changed or serverkey.changed or crlcrt.changed
+  notify:
+    - Restart openVPN server
+
+- name: Enable and start OpenVPN server
+  service:
+    name: openvpn@server
+    state: started
+    enabled: yes

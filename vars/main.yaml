@@ -1,0 +1,20 @@
+openvpn_packets:
+  - "openvpn"
+  - "easy-rsa"
+
+openvpn_directory: /etc/openvpn
+openvpn_client_configuration_directory: /etc/openvpn/client-configuration
+openvpn_network: "10.8.0.0"
+openvpn_netmask: "255.255.255.0"
+openvpn_cidr: "10.8.0.0/24"
+
+easyrsa_directory: /usr/share/easy-rsa/3
+easyrsa_dn: "cn_only"
+easyrsa_keysize: 2048
+easyrsa_digest: "sha256"
+easyrsa_req_country: "PL"
+easyrsa_req_province: "Province"
+easyrsa_req_city: "City"
+easyrsa_req_org: "Organization"
+easyrsa_req_email: "you@example.com"
+easyrsa_req_ou: "IT"

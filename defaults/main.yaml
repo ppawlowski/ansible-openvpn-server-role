@@ -1,0 +1,4 @@
+openvpn_port: "1194"
+openvpn_server_common_name: "vpn.example.com"
+openvpn_routed_networks:
+  - { ip: '172.31.0.0', netmask: '255.0.0.0'}

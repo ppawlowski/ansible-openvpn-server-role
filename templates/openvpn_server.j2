@@ -1,0 +1,28 @@
+port {{openvpn_port}}
+proto udp
+dev tun
+ca ca.crt
+cert server.crt
+key server.key
+dh dh.pem
+crl-verify crl.pem
+server {{openvpn_network}} {{openvpn_netmask}}
+# client-config-dir ccd
+ifconfig-pool-persist ipp.txt
+{% for item in openvpn_routed_networks %}
+push "route {{item.ip}} {{item.netmask}}"
+{% endfor %}
+{% for item in openvpn_dns_servers %}
+push "dhcp-option DNS {{item}}"
+{% endfor %}
+{% for item in openvpn_dns_search_domains %}
+push "dhcp-option DOMAIN {{item}}"
+{% endfor %}
+keepalive 10 120
+cipher AES-256-CBC
+persist-key
+persist-tun
+status /var/log/openvpn-status.log
+log-append /var/log/openvpn.log
+verb 3
+explicit-exit-notify 1

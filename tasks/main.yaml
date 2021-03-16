@@ -1,0 +1,8 @@
+- import_tasks: install.yaml
+  tags: packer
+
+- import_tasks: configure.yaml
+  tags: terraform
+
+- import_tasks: users_management.yaml
+  tags: terraform

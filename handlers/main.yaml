@@ -1,0 +1,4 @@
+- name: Restart openVPN server
+  service:
+    name: openvpn@server
+    state: restarted
